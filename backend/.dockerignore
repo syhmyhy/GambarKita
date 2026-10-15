@@ -1,0 +1,12 @@
+# Only the app code and requirements go into the image.
+.venv/
+.env
+.env.*
+storage/
+tests/
+.idea/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+Dockerfile
+.dockerignore

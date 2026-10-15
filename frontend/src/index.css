@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+
+/* Design tokens. Brand: a warm coral for celebrations; neutrals: Tailwind "stone". */
+@theme {
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+
+  --color-brand-50: oklch(0.975 0.014 30);
+  --color-brand-100: oklch(0.945 0.034 30);
+  --color-brand-200: oklch(0.89 0.07 30);
+  --color-brand-300: oklch(0.815 0.12 31);
+  --color-brand-400: oklch(0.735 0.165 31);
+  --color-brand-500: oklch(0.665 0.19 31);
+  --color-brand-600: oklch(0.575 0.19 30);
+  --color-brand-700: oklch(0.515 0.17 30);
+  --color-brand-800: oklch(0.435 0.14 30);
+  --color-brand-900: oklch(0.375 0.11 30);
+  --color-brand-950: oklch(0.26 0.08 30);
+
+  --radius-card: 1.25rem;
+
+  --animate-pop-in: pop-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  --animate-fade-in: fade-in 0.4s ease-out both;
+  --animate-slide-up: slide-up 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-ken-burns: ken-burns 12s ease-out both;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.85) translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes ken-burns {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(1.06);
+    }
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    @apply bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply min-h-dvh;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+
+  ::selection {
+    @apply bg-brand-200 text-brand-950;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

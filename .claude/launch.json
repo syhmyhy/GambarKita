@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "C:/Users/Syhmyhy/Desktop/GambarKita/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["C:/Users/Syhmyhy/Desktop/GambarKita/backend/run.py"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "C:/Users/Syhmyhy/Desktop/GambarKita/frontend"],
+      "port": 5173
+    }
+  ]
+}

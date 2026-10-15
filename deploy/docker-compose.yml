@@ -1,0 +1,78 @@
+# GambarKita production stack.
+#   cd deploy && cp .env.example .env   (then edit .env)
+#   docker compose up -d --build
+#
+# Only Caddy is reachable from outside (ports 80/443). The API sits on a private
+# Docker network with no internet or home-LAN access, and trusts forwarded client
+# IPs only from that network.
+
+name: gambarkita
+
+services:
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GK_ENVIRONMENT: production
+      GK_PUBLIC_APP_URL: ${PUBLIC_URL:?Set PUBLIC_URL in deploy/.env}
+      GK_CORS_ORIGINS: ${PUBLIC_URL}
+      GK_EVENT_CREATION_KEY: ${GK_EVENT_CREATION_KEY:?Set GK_EVENT_CREATION_KEY in deploy/.env}
+      GK_TRUSTED_HOSTS: ${SITE_ADDRESS},localhost,127.0.0.1
+      GK_HSTS_ENABLED: "true"
+      # Caddy's address range: lets rate limits see each guest's real IP.
+      GK_FORWARDED_ALLOW_IPS: 172.28.0.0/24
+    volumes:
+      - gambarkita-data:/data
+    networks:
+      - internal
+    # Hardening: nothing but /data (photos + database) and /tmp is writable.
+    # /tmp holds uploads in progress and lives in RAM, so it gets a size cap.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    build: ../frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in deploy/.env}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # HTTPS certificates: keep this volume!
+      - caddy-config:/config
+    networks:
+      - internal
+      - egress # the internet (guests, Let's Encrypt)
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+networks:
+  internal:
+    internal: true # no route out: a compromised API can't reach your router or LAN
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+  egress: {}
+
+volumes:
+  gambarkita-data:
+  caddy-data:
+  caddy-config:

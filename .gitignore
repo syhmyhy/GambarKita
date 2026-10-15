@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data (uploaded photos + SQLite metadata) and secrets
+backend/storage/
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+*.local
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Production secrets
+deploy/.env

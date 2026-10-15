@@ -1,0 +1,76 @@
+# Caddy gets and renews a free HTTPS certificate for {$SITE_ADDRESS}
+# automatically (Let's Encrypt) and redirects http:// to https://.
+{
+	# No per-request access log: request headers carry secrets (the host token in
+	# Sec-WebSocket-Protocol, the creation key in X-Event-Creation-Key, each guest's
+	# key in X-Guest-Key). Error log lines also include headers, so those are
+	# removed from every log line.
+	log {
+		format filter {
+			wrap console
+			fields {
+				request>headers>Sec-Websocket-Protocol delete
+				request>headers>X-Event-Creation-Key delete
+				request>headers>X-Guest-Key delete
+			}
+		}
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Too-large uploads are refused here, before proxying. If the API refused them
+	# mid-upload instead, Caddy could show guests a 502 rather than this message.
+	# 10551296 = GK_MAX_UPLOAD_BYTES (10 MB) + 64 KB form overhead: change both together.
+	@too_large expression `{http.request.header.Content-Length}.matches("^[0-9]{1,18}$") && int({http.request.header.Content-Length}) > 10551296`
+	handle @too_large {
+		header Content-Type application/json
+		header Cache-Control no-store
+		respond `{"error":{"code":"PAYLOAD_TOO_LARGE","message":"The request body is too large (limit: 10551296 bytes).","details":{"max_bytes":10551296},"request_id":null}}` 413 {
+			close
+		}
+	}
+
+	# API, photos and live updates: FastAPI. Caddy sends the real client IP in
+	# X-Forwarded-For and replaces any value the client tried to send itself.
+	@backend path /api/* /media/* /ws/*
+	handle @backend {
+		request_body {
+			max_size 11MB
+		}
+		reverse_proxy backend:8000 {
+			transport http {
+				# Shorter than uvicorn's 5 s keep-alive, so Caddy never reuses a
+				# connection the API is closing (that would fail an upload with 502).
+				keepalive 4s
+			}
+		}
+	}
+
+	# Built JS/CSS/fonts: file names contain a content hash, so cache them forever.
+	# A missing file is a 404, never index.html.
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Everything else: the React app (single-page app, so unknown paths get index.html).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		header Cache-Control "no-cache"
+		header Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' wss://{hostport}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		header X-Frame-Options "DENY"
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-Server
+	}
+}
