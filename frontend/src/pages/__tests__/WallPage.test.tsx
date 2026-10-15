@@ -167,13 +167,17 @@ describe("WallPage", () => {
     expect(screen.getByRole("img", { name: "Photo by Daniel" })).toHaveAttribute("src", mediaUrl(photos[1]!.thumbnail_url));
     expect(screen.getByRole("img", { name: "Guest photo" })).toHaveAttribute("src", mediaUrl(photos[2]!.thumbnail_url));
     expect(screen.getByRole("link", { name: "Add photos" })).toHaveAttribute("href", `/e/${EVENT_ID}`);
+    // Laptops and desktops can add photos too, not just phones.
+    expect(screen.getByRole("link", { name: "Add photos" }).className).not.toMatch(/\b(lg|xl|2xl):hidden\b/);
   });
 
   it("lays the photos out in rows of square tiles, newest first, readable from across the room", () => {
     const { update } = renderWall(feed());
 
     const list = screen.getByRole("list");
-    expect(list).toHaveClass("grid", "grid-cols-2", "sm:grid-cols-3", "lg:grid-cols-4", "2xl:grid-cols-5");
+    expect(list).toHaveClass("grid");
+    // jsdom's 1024 px window: the automatic large-screen layout, 4 per row.
+    expect(list.style.gridTemplateColumns).toBe("repeat(4, minmax(0, 1fr))");
     expect(list.className).not.toMatch(/columns-/);
     const alts = () => within(list).getAllByRole("img").map((image) => image.getAttribute("alt"));
     expect(alts()).toEqual(["Cutting the cake (photo by Aisyah)", "Photo by Daniel", "Guest photo"]);
@@ -431,5 +435,93 @@ describe("WallPage", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Photo by Daniel" })).toHaveFocus();
+  });
+});
+
+describe("WallPage grid zoom", () => {
+  const columns = () => screen.getByRole("list").style.gridTemplateColumns;
+  const perRow = (count: number) => `repeat(${count}, minmax(0, 1fr))`;
+
+  /** A touch event with these finger positions (jsdom can't build real Touch objects). */
+  function touch(target: Element, type: "touchstart" | "touchmove" | "touchend", fingers: Array<[number, number]>) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "touches", { value: fingers.map(([clientX, clientY]) => ({ clientX, clientY })) });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it("changes the photos per row with the zoom buttons and remembers it on this device", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderWall(feed());
+    expect(columns()).toBe(perRow(4));
+
+    await user.click(screen.getByRole("button", { name: "Bigger photos" }));
+    expect(columns()).toBe(perRow(3));
+    await user.click(screen.getByRole("button", { name: "Smaller photos" }));
+    await user.click(screen.getByRole("button", { name: "Smaller photos" }));
+    expect(columns()).toBe(perRow(5));
+    expect(window.localStorage.getItem("gk.wall-columns")).toBe("5");
+
+    unmount();
+    renderWall(feed());
+    expect(columns()).toBe(perRow(5));
+  });
+
+  it("stops at one photo per row, which shows the whole photo uncropped", async () => {
+    window.localStorage.setItem("gk.wall-columns", "2");
+    const user = userEvent.setup();
+    renderWall(feed());
+
+    await user.click(screen.getByRole("button", { name: "Bigger photos" }));
+    expect(columns()).toBe(perRow(1));
+    expect(screen.getByRole("button", { name: "Bigger photos" })).toBeDisabled();
+    const cake = screen.getByRole("img", { name: "Cutting the cake (photo by Aisyah)" });
+    expect(cake).not.toHaveClass("aspect-square");
+    expect(cake.style.aspectRatio).toBe("1600 / 1200");
+    // Big tiles may load the full photo, so it stays sharp.
+    expect(cake.getAttribute("srcset")).toContain(`${mediaUrl(`/media/events/${EVENT_ID}/photos/`)}`);
+  });
+
+  it("zooms with a two-finger pinch instead of zooming the page", () => {
+    renderWall(feed());
+    const grid = screen.getByRole("region", { name: "Photos" });
+
+    // Fingers spread to twice the distance: bigger photos, one fewer per row.
+    touch(grid, "touchstart", [[100, 300], [200, 300]]);
+    expect(touch(grid, "touchmove", [[50, 300], [250, 300]]).defaultPrevented).toBe(true);
+    touch(grid, "touchend", []);
+    expect(columns()).toBe(perRow(3));
+
+    // Fingers close in: smaller photos.
+    touch(grid, "touchstart", [[50, 300], [250, 300]]);
+    touch(grid, "touchmove", [[100, 300], [200, 300]]);
+    touch(grid, "touchend", []);
+    expect(columns()).toBe(perRow(4));
+
+    // One finger just scrolls.
+    touch(grid, "touchstart", [[100, 300]]);
+    expect(touch(grid, "touchmove", [[100, 200]]).defaultPrevented).toBe(false);
+    expect(columns()).toBe(perRow(4));
+  });
+
+  it("zooms with a trackpad pinch or Ctrl + mouse wheel, but leaves plain scrolling alone", () => {
+    renderWall(feed());
+    const grid = screen.getByRole("region", { name: "Photos" });
+
+    expect(fireEvent.wheel(grid, { ctrlKey: true, deltaY: -100 })).toBe(false);
+    expect(columns()).toBe(perRow(3));
+    fireEvent.wheel(grid, { ctrlKey: true, deltaY: 100 });
+    fireEvent.wheel(grid, { ctrlKey: true, deltaY: 100 });
+    expect(columns()).toBe(perRow(5));
+
+    expect(fireEvent.wheel(grid, { deltaY: 100 })).toBe(true);
+    expect(columns()).toBe(perRow(5));
+  });
+
+  it("has no zoom buttons in the slideshow", () => {
+    renderWall(feed(), `/e/${EVENT_ID}/wall?view=slideshow`);
+    expect(screen.queryByRole("button", { name: "Bigger photos" })).not.toBeInTheDocument();
   });
 });

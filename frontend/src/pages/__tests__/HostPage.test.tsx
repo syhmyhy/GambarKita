@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, useLocation } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UNDO_DELETE_MS } from "../../components/host/PhotosSection";
 import { ToastProvider } from "../../components/ui/Toast";
 import { type LiveFeed, useLiveFeed } from "../../hooks/useLiveFeed";
 import { ApiError, api, networkError } from "../../lib/api";
@@ -420,34 +421,110 @@ describe("HostPage dashboard", () => {
     expect(hostedEvents.list()[0]?.name).toBe("Garden Party");
   });
 
-  it("deletes a photo only after confirmation", async () => {
-    signIn();
-    const user = userEvent.setup();
-    renderPage();
+  describe("deleting a photo, with undo", () => {
+    const ANA_DELETE = "Delete photo by Ana: First dance!";
 
-    await user.click(await screen.findByRole("button", { name: "Delete photo by Ana: First dance!" }));
-    const dialog = screen.getByRole("dialog", { name: "Delete this photo?" });
-    expect(api.deletePhoto).not.toHaveBeenCalled();
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    await user.click(within(dialog).getByRole("button", { name: "Delete photo" }));
+    /** Shows the dashboard, then fakes the clock so tests can skip the undo time (plain clicks from here on). */
+    async function renderWithClock() {
+      signIn();
+      const view = renderPage();
+      await screen.findByRole("button", { name: ANA_DELETE });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      return { view };
+    }
 
-    await waitFor(() => expect(api.deletePhoto).toHaveBeenCalledWith(EVENT_ID, PHOTO_ANA.id, TOKEN));
-    await waitFor(() => expect(feed.removePhoto).toHaveBeenCalledWith(PHOTO_ANA.id));
-    expect(await screen.findByText("Photo deleted")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
+    const photosRegion = () => screen.getByRole("region", { name: "Photos" });
+    const skipUndoTime = () => act(async () => vi.advanceTimersByTime(UNDO_DELETE_MS));
 
-  it("keeps the photo when deletion is cancelled", async () => {
-    signIn();
-    const user = userEvent.setup();
-    renderPage();
+    it("hides the photo at once and deletes it when the undo time is up", async () => {
+      await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: ANA_DELETE }));
 
-    await user.click(await screen.findByRole("button", { name: "Delete photo by a guest, 1 minute ago" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+      // No confirmation dialog: the photo goes, with an Undo button for a few seconds.
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: ANA_DELETE })).not.toBeInTheDocument();
+      expect(within(photosRegion()).getByText("1 photo")).toBeInTheDocument();
+      expect(screen.getByText("Photo deleted")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Photos" })).toHaveFocus();
+      expect(api.deletePhoto).not.toHaveBeenCalled();
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(api.deletePhoto).not.toHaveBeenCalled();
-    expect(feed.removePhoto).not.toHaveBeenCalled();
+      await skipUndoTime();
+      expect(api.deletePhoto).toHaveBeenCalledWith(EVENT_ID, PHOTO_ANA.id, TOKEN);
+      expect(feed.removePhoto).toHaveBeenCalledWith(PHOTO_ANA.id);
+      expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    });
+
+    it("brings the photo back and deletes nothing when the host taps Undo", async () => {
+      await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: "Delete photo by a guest, 1 minute ago" }));
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+      expect(screen.getByRole("button", { name: "Delete photo by a guest, 1 minute ago" })).toBeInTheDocument();
+      expect(within(photosRegion()).getByText("2 photos")).toBeInTheDocument();
+      expect(screen.getByText("Photo kept")).toBeInTheDocument();
+      expect(screen.queryByText("Photo deleted")).not.toBeInTheDocument();
+
+      await skipUndoTime();
+      expect(api.deletePhoto).not.toHaveBeenCalled();
+      expect(feed.removePhoto).not.toHaveBeenCalled();
+    });
+
+    it("can undo each of several deletes on its own", async () => {
+      await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: ANA_DELETE }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete photo by a guest, 1 minute ago" }));
+      expect(within(photosRegion()).getByText("0 photos")).toBeInTheDocument();
+
+      // The newest toast's Undo brings back the second photo only.
+      const undoButtons = screen.getAllByRole("button", { name: "Undo" });
+      expect(undoButtons).toHaveLength(2);
+      fireEvent.click(undoButtons[1]!);
+
+      await skipUndoTime();
+      expect(api.deletePhoto).toHaveBeenCalledTimes(1);
+      expect(api.deletePhoto).toHaveBeenCalledWith(EVENT_ID, PHOTO_ANA.id, TOKEN);
+    });
+
+    it("shows the photo again if the delete fails", async () => {
+      vi.mocked(api.deletePhoto).mockRejectedValue(networkError());
+      await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: ANA_DELETE }));
+
+      await skipUndoTime();
+      expect(screen.getByRole("button", { name: ANA_DELETE })).toBeInTheDocument();
+      expect(feed.removePhoto).not.toHaveBeenCalled();
+    });
+
+    it("sends a waiting delete at once when the host leaves the page", async () => {
+      const { view } = await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: ANA_DELETE }));
+
+      view.unmount();
+      expect(api.deletePhoto).toHaveBeenCalledWith(EVENT_ID, PHOTO_ANA.id, TOKEN, { keepalive: true });
+    });
+
+    it("sends a waiting delete at once when the tab goes to the background", async () => {
+      await renderWithClock();
+      fireEvent.click(screen.getByRole("button", { name: ANA_DELETE }));
+
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      try {
+        document.dispatchEvent(new Event("visibilitychange"));
+      } finally {
+        visibility.mockRestore();
+      }
+      expect(api.deletePhoto).toHaveBeenCalledWith(EVENT_ID, PHOTO_ANA.id, TOKEN, { keepalive: true });
+      // Already sent: Undo can't bring it back any more, and the timer sends nothing twice.
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+      expect(screen.queryByRole("button", { name: ANA_DELETE })).not.toBeInTheDocument();
+      await skipUndoTime();
+      expect(api.deletePhoto).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("tells apart the delete buttons of photos by the same guest", async () => {

@@ -21,7 +21,7 @@ export function EmptyWall({ uploadUrl, uploadHref, eventName, uploadsOpen }: Emp
           <p className="mt-3 text-lg text-white/70 text-pretty">Point your phone's camera at the code. No app or sign-up needed.</p>
           <EventQrCode url={uploadUrl} eventName={eventName} size={260} showActions={false} className="mt-8 2xl:[&_svg]:size-80" />
           <p className="mt-4 max-w-full font-semibold break-all text-white/80 sm:text-lg">{displayUrl(uploadUrl)}</p>
-          <ButtonLink to={uploadHref} size="lg" className="mt-6 lg:hidden" icon={<Camera className="size-5" aria-hidden="true" />}>
+          <ButtonLink to={uploadHref} size="lg" className="mt-6" icon={<Camera className="size-5" aria-hidden="true" />}>
             Add the first photo
           </ButtonLink>
         </>

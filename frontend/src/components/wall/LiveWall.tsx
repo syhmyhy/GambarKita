@@ -12,6 +12,7 @@ import { PhotoGrid } from "./PhotoGrid";
 import { QrPanel } from "./QrPanel";
 import { Slideshow } from "./Slideshow";
 import { useFullscreen } from "./useFullscreen";
+import { useGridZoom } from "./useGridZoom";
 import { useIdle } from "./useIdle";
 import { useMediaQuery } from "./useMediaQuery";
 import { type WallMode, WallTopBar } from "./WallTopBar";
@@ -40,6 +41,7 @@ export function LiveWall({ eventId, event, feed }: LiveWallProps) {
   const isLargeScreen = useMediaQuery(LARGE_SCREEN);
   const fullscreen = useFullscreen();
   const idle = useIdle(AUTO_HIDE_MS, mode === "slideshow" || fullscreen.active);
+  const gridZoom = useGridZoom();
 
   const empty = photos.length === 0;
   const slideshow = mode === "slideshow" && !empty;
@@ -102,6 +104,16 @@ export function LiveWall({ eventId, event, feed }: LiveWallProps) {
         onToggleFullscreen={toggleFullscreen}
         qrOpen={qrOpen}
         onToggleQr={empty ? undefined : () => setQrChoice(!qrOpen)}
+        zoom={
+          empty || slideshow
+            ? undefined
+            : {
+                onBigger: () => gridZoom.zoom(-1),
+                onSmaller: () => gridZoom.zoom(1),
+                canBigger: gridZoom.canZoomIn,
+                canSmaller: gridZoom.canZoomOut,
+              }
+        }
         overlay={slideshow}
         hidden={idle}
       />
@@ -129,6 +141,8 @@ export function LiveWall({ eventId, event, feed }: LiveWallProps) {
             loadFailed={loadFailed}
             onLoadMore={loadOlder}
             reserveCorner={qrOpen}
+            columns={gridZoom.columns}
+            onZoom={gridZoom.zoom}
           />
         )}
       </main>

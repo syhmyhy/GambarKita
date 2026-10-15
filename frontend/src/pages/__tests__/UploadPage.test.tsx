@@ -210,17 +210,24 @@ describe("UploadPage", () => {
     expect(screen.getByRole("link", { name: "Wall" })).toHaveAttribute("href", `/e/${EVENT_ID}/wall`);
     expect(cameraInput()).toHaveAttribute("capture", "environment");
     expect(galleryInput()).toHaveAttribute("multiple");
-    expect(screen.getByText("Photos are processed to remove location data.")).toBeInTheDocument();
+    expect(screen.getByText("Your photo's location is removed before it's saved or shown.")).toBeInTheDocument();
   });
 
   describe("confirming before photos go on the wall", () => {
+    const tile = (dialog: HTMLElement, number: number) => within(dialog).getByRole("button", { name: `Share photo ${number}` });
+    const tileSrc = (dialog: HTMLElement, number: number) => tile(dialog, number).querySelector("img")?.getAttribute("src");
+
     it("shows the picked photos and uploads nothing until the guest confirms", async () => {
       const { user } = await renderOpenEvent();
       await user.upload(galleryInput(), [jpeg("one.jpg"), jpeg("two.jpg")]);
 
       const dialog = await screen.findByRole("dialog", { name: "Share these 2 photos on the live wall?" });
-      expect(within(dialog).getByRole("img", { name: "Photo 1" })).toHaveAttribute("src", "blob:one.jpg");
-      expect(within(dialog).getByRole("img", { name: "Photo 2" })).toHaveAttribute("src", "blob:two.jpg");
+      expect(tileSrc(dialog, 1)).toBe("blob:one.jpg");
+      expect(tileSrc(dialog, 2)).toBe("blob:two.jpg");
+      expect(tile(dialog, 1)).toHaveAttribute("aria-pressed", "true");
+      expect(tile(dialog, 2)).toHaveAttribute("aria-pressed", "true");
+      // Without a per-guest limit there is no count to show.
+      expect(within(dialog).queryByText(/chosen$/)).not.toBeInTheDocument();
       expect(preparePhoto).not.toHaveBeenCalled();
       expect(uploadPhoto).not.toHaveBeenCalled();
       expect(screen.queryByRole("list", { name: "Your photos" })).not.toBeInTheDocument();
@@ -235,14 +242,20 @@ describe("UploadPage", () => {
       expect(within(grid).getByRole("img", { name: "Photo 1" })).toHaveAttribute("src", "blob:one.jpg");
     });
 
-    it("asks about a single camera shot too", async () => {
+    it("asks about a single camera shot too, and can't share nothing", async () => {
       const { user } = await renderOpenEvent();
       await user.upload(cameraInput(), jpeg("party.jpg"));
 
       const dialog = await screen.findByRole("dialog", { name: "Share this photo on the live wall?" });
-      expect(within(dialog).getByText("Everyone at the event will see it. Only the host can remove a photo once it's shared.")).toBeInTheDocument();
-      // With one photo, Cancel is the way out.
-      expect(within(dialog).queryByRole("button", { name: /don't share/i })).not.toBeInTheDocument();
+      expect(
+        within(dialog).getByText("Everyone at the event will see it. Only the host can remove a photo once it's shared."),
+      ).toBeInTheDocument();
+
+      await user.click(tile(dialog, 1));
+      expect(screen.getByRole("dialog", { name: "Choose photos to share" })).toBe(dialog);
+      expect(within(dialog).getByRole("button", { name: "Share 0 photos" })).toBeDisabled();
+
+      await user.click(tile(dialog, 1));
       await user.click(within(dialog).getByRole("button", { name: "Share 1 photo" }));
       await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(1));
     });
@@ -269,14 +282,33 @@ describe("UploadPage", () => {
       await user.upload(galleryInput(), files);
 
       const dialog = await screen.findByRole("dialog", { name: "Share these 3 photos on the live wall?" });
-      await user.click(within(dialog).getByRole("button", { name: "Don't share photo 2" }));
-      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:two.jpg");
+      await user.click(tile(dialog, 2));
+      expect(tile(dialog, 2)).toHaveAttribute("aria-pressed", "false");
       expect(screen.getByRole("dialog", { name: "Share these 2 photos on the live wall?" })).toBe(dialog);
 
       await user.click(within(dialog).getByRole("button", { name: "Share 2 photos" }));
       await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(2));
       expect(uploadPhoto).toHaveBeenCalledWith(EVENT_ID, files[0], "one.jpg", expect.anything());
       expect(uploadPhoto).toHaveBeenCalledWith(EVENT_ID, files[2], "three.jpg", expect.anything());
+      // The left-out photo's preview isn't needed any more.
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:two.jpg");
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:one.jpg");
+    });
+
+    it("lets the guest add more photos before sharing", async () => {
+      const { user } = await renderOpenEvent();
+      await user.upload(cameraInput(), jpeg("first.jpg"));
+      const dialog = await screen.findByRole("dialog");
+
+      await user.click(within(dialog).getByRole("button", { name: "Add photos" }));
+      await user.upload(within(dialog).getByLabelText("Add photos from your gallery"), [jpeg("second.jpg"), jpeg("third.jpg")]);
+
+      expect(screen.getByRole("dialog", { name: "Share these 3 photos on the live wall?" })).toBe(dialog);
+      expect(tileSrc(dialog, 3)).toBe("blob:third.jpg");
+      await user.click(within(dialog).getByRole("button", { name: "Share 3 photos" }));
+      // Two upload at a time; all three are queued.
+      const grid = await screen.findByRole("list", { name: "Your photos" });
+      expect(within(grid).getAllByRole("listitem")).toHaveLength(3);
     });
 
     it("releases the previews if the page goes away before the guest answers", async () => {
@@ -522,8 +554,11 @@ describe("UploadPage", () => {
     await user.upload(galleryInput(), files);
 
     const dialog = await screen.findByRole("dialog", { name: "Share these 20 photos on the live wall?" });
-    expect(within(dialog).getByText("Adding the first 20 photos")).toBeInTheDocument();
+    expect(within(dialog).getByText("Showing the first 20 photos")).toBeInTheDocument();
     expect(within(dialog).getByText("You picked 23. Send the rest in another go.")).toBeInTheDocument();
+    expect(within(within(dialog).getByRole("list", { name: "Photos to share" })).getAllByRole("listitem")).toHaveLength(20);
+    // No room for more in this go.
+    expect(within(dialog).queryByRole("button", { name: /^Add/ })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Share 20 photos" }));
 
     const grid = await screen.findByRole("list", { name: "Your photos" });
@@ -603,24 +638,73 @@ describe("UploadPage", () => {
       expect(heading).not.toHaveFocus();
     });
 
-    it("adds only as many photos as the guest has left", async () => {
+    it("says on the gallery button how many photos fit, before the guest picks", async () => {
+      limitTo(5, 3);
+      await renderOpenEvent();
+      expect(screen.getByRole("button", { name: "Choose up to 2 photos" })).toBeInTheDocument();
+      expect(galleryInput()).toHaveAttribute("multiple");
+    });
+
+    it("lets the gallery pick only one photo when one is left", async () => {
+      limitTo(5, 4);
+      await renderOpenEvent();
+      expect(screen.getByRole("button", { name: "Choose 1 photo" })).toBeInTheDocument();
+      expect(galleryInput()).not.toHaveAttribute("multiple");
+    });
+
+    it("lets a guest who picked too many choose which photos to share", async () => {
       limitTo(5, 3);
       const { user } = await renderOpenEvent();
       expect(screen.getByText("You can share 2 more photos")).toBeInTheDocument();
 
-      await user.upload(galleryInput(), [jpeg("a.jpg"), jpeg("b.jpg"), jpeg("c.jpg"), jpeg("d.jpg")]);
+      const files = [jpeg("a.jpg"), jpeg("b.jpg"), jpeg("c.jpg"), jpeg("d.jpg")];
+      await user.upload(galleryInput(), files);
 
-      // Said in the confirmation, which shows only the photos that fit.
+      // Every pick is shown; the first ones that fit are chosen.
       const dialog = await screen.findByRole("dialog", { name: "Share these 2 photos on the live wall?" });
-      expect(within(dialog).getByText("You can add 2 more photos")).toBeInTheDocument();
-      expect(
-        within(dialog).getByText("Adding 2 photos of the 4 you picked. Each guest can share up to 5 photos."),
-      ).toBeInTheDocument();
-      expect(within(within(dialog).getByRole("list", { name: "Photos to share" })).getAllByRole("listitem")).toHaveLength(2);
+      expect(within(dialog).getByText("You can share 2 more photos")).toBeInTheDocument();
+      expect(within(dialog).getByText("You picked 4. Tap the photos to choose which 2 to share.")).toBeInTheDocument();
+      expect(within(dialog).getByText("2 of 2 chosen")).toBeInTheDocument();
+      const tile = (number: number) => within(dialog).getByRole("button", { name: `Share photo ${number}` });
+      expect([1, 2, 3, 4].map((number) => tile(number).getAttribute("aria-pressed"))).toEqual(["true", "true", "false", "false"]);
+      expect(within(dialog).queryByRole("button", { name: /^Add/ })).not.toBeInTheDocument();
+
+      // Full: a third one is turned down until one comes out.
+      await user.click(tile(3));
+      expect(within(dialog).getByText("You can share up to 2 photos. Tap a chosen photo to take it out first.")).toBeInTheDocument();
+      expect(tile(3)).toHaveAttribute("aria-pressed", "false");
+
+      await user.click(tile(1));
+      expect(within(dialog).getByText("1 of 2 chosen")).toBeInTheDocument();
+      await user.click(tile(3));
+      expect(within(dialog).getByText("2 of 2 chosen")).toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: "Share 2 photos" }));
 
-      const grid = await screen.findByRole("list", { name: "Your photos" });
+      await waitFor(() => expect(uploadPhoto).toHaveBeenCalledTimes(2));
+      expect(uploadPhoto).toHaveBeenCalledWith(EVENT_ID, files[1], "b.jpg", expect.anything());
+      expect(uploadPhoto).toHaveBeenCalledWith(EVENT_ID, files[2], "c.jpg", expect.anything());
+      const grid = screen.getByRole("list", { name: "Your photos" });
       expect(within(grid).getAllByRole("listitem")).toHaveLength(2);
+    });
+
+    it("offers to add a photo only while the guest has room", async () => {
+      limitTo(5, 2);
+      const { user } = await renderOpenEvent();
+      await user.upload(galleryInput(), [jpeg("a.jpg"), jpeg("b.jpg")]);
+
+      const dialog = await screen.findByRole("dialog", { name: "Share these 2 photos on the live wall?" });
+      expect(within(dialog).getByText("2 of 3 chosen")).toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Add a photo" }));
+      const addInput = within(dialog).getByLabelText<HTMLInputElement>("Add photos from your gallery");
+      expect(addInput).not.toHaveAttribute("multiple");
+      await user.upload(addInput, jpeg("c.jpg"));
+
+      expect(within(dialog).getByText("3 of 3 chosen")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /^Add/ })).not.toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Share 3 photos" }));
+      // Two upload at a time; all three are queued.
+      const grid = await screen.findByRole("list", { name: "Your photos" });
+      expect(within(grid).getAllByRole("listitem")).toHaveLength(3);
     });
 
     it("holds the pickers while the last allowed photo is sending, so no camera shot is lost", async () => {
@@ -658,16 +742,20 @@ describe("UploadPage", () => {
       limitTo(20);
       const { user } = await renderOpenEvent();
       await user.upload(galleryInput(), Array.from({ length: 25 }, (_, index) => jpeg(`p${index + 1}.jpg`)));
-      expect(await screen.findByText("You can add 20 more photos")).toBeInTheDocument();
-      expect(screen.getByText("Adding 20 photos of the 25 you picked. Each guest can share up to 20 photos.")).toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog", { name: "Share these 20 photos on the live wall?" });
+      expect(within(dialog).getByText("You can share up to 20 photos")).toBeInTheDocument();
+      expect(
+        within(dialog).getByText("You picked 25. Tap the photos to choose which 20 to share. Only the first 20 are shown."),
+      ).toBeInTheDocument();
     });
 
     it("tells a guest with a big allowance how many more fit after the first 20", async () => {
       limitTo(30);
       const { user } = await renderOpenEvent();
       await user.upload(galleryInput(), Array.from({ length: 25 }, (_, index) => jpeg(`p${index + 1}.jpg`)));
-      expect(await screen.findByText("Adding the first 20 photos")).toBeInTheDocument();
-      expect(screen.getByText("You picked 25. You can send 10 more photos after these.")).toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog", { name: "Share these 20 photos on the live wall?" });
+      expect(within(dialog).getByText("Showing the first 20 photos")).toBeInTheDocument();
+      expect(within(dialog).getByText("You picked 25. You can send 10 more photos after these.")).toBeInTheDocument();
     });
 
     it("counts a returning guest's photos that were still sending when they left the page", async () => {

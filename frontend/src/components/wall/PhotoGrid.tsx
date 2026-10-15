@@ -5,8 +5,16 @@ import type { Photo } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { cn } from "../ui/cn";
 import { PhotoTile } from "./PhotoTile";
+import { type GridZoom, usePinchZoom } from "./useGridZoom";
 
 const HIGHLIGHT_MS = 4000;
+
+/** Tighter gaps as the tiles get smaller, like iPhone Photos. */
+function gapFor(columns: number): string {
+  if (columns >= 6) return "gap-1";
+  if (columns >= 4) return "gap-2 sm:gap-3";
+  return "gap-3";
+}
 
 interface PhotoGridProps {
   photos: Photo[];
@@ -19,6 +27,9 @@ interface PhotoGridProps {
   onLoadMore: () => void;
   /** Leave room at the bottom for the QR panel on large screens. */
   reserveCorner: boolean;
+  /** How many photos per row; pinching the grid calls ``onZoom``. */
+  columns: number;
+  onZoom: GridZoom["zoom"];
 }
 
 /**
@@ -26,9 +37,22 @@ interface PhotoGridProps {
  * older photos. Row-major order keeps every tile in place when a new photo
  * arrives or an older page loads, so nothing reshuffles under the viewer.
  */
-export function PhotoGrid({ photos, latestLiveId, onOpen, hasMore, loadingMore, loadFailed, onLoadMore, reserveCorner }: PhotoGridProps) {
+export function PhotoGrid({
+  photos,
+  latestLiveId,
+  onOpen,
+  hasMore,
+  loadingMore,
+  loadFailed,
+  onLoadMore,
+  reserveCorner,
+  columns,
+  onZoom,
+}: PhotoGridProps) {
+  const sectionRef = useRef<HTMLElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const highlightId = useBriefly(latestLiveId, HIGHLIGHT_MS);
+  usePinchZoom(sectionRef, onZoom);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -46,6 +70,7 @@ export function PhotoGrid({ photos, latestLiveId, onOpen, hasMore, loadingMore, 
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Photos"
       className={cn(
         // Clear the notch / home indicator side insets on iPhones held in landscape.
@@ -54,9 +79,13 @@ export function PhotoGrid({ photos, latestLiveId, onOpen, hasMore, loadingMore, 
         reserveCorner && "lg:pb-80",
       )}
     >
-      <ul role="list" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+      <ul
+        role="list"
+        className={cn("grid", gapFor(columns))}
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      >
         {photos.map((photo) => (
-          <PhotoTile key={photo.id} photo={photo} highlight={photo.id === highlightId} onOpen={onOpen} />
+          <PhotoTile key={photo.id} photo={photo} highlight={photo.id === highlightId} onOpen={onOpen} columns={columns} />
         ))}
       </ul>
       <div ref={sentinelRef} aria-hidden="true" className="h-px" />

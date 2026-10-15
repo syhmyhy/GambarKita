@@ -12,6 +12,8 @@ interface ConfirmDialogProps {
   confirmText?: string;
   destructive?: boolean;
   busy?: boolean;
+  /** Keep the confirm button disabled (e.g. nothing chosen yet). */
+  confirmDisabled?: boolean;
   /** Extra content between the description and the buttons (e.g. previews). */
   children?: ReactNode;
   onConfirm: () => void;
@@ -30,6 +32,7 @@ export function ConfirmDialog({
   confirmText,
   destructive,
   busy,
+  confirmDisabled = false,
   children,
   onConfirm,
   onCancel,
@@ -50,7 +53,7 @@ export function ConfirmDialog({
     }
   }, [open]);
 
-  const canConfirm = !confirmText || typed.trim().toLowerCase() === confirmText.toLowerCase();
+  const canConfirm = !confirmDisabled && (!confirmText || typed.trim().toLowerCase() === confirmText.toLowerCase());
 
   return (
     <dialog

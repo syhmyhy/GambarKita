@@ -110,6 +110,15 @@ export const guestKeys = {
   },
 };
 
+/** How many columns the live wall grid shows on this device (pinch or zoom buttons); null = automatic. */
+export const wallColumns = {
+  get: (): number | null => {
+    const value = Number(read("gk.wall-columns"));
+    return Number.isInteger(value) && value >= 1 && value <= 12 ? value : null;
+  },
+  set: (columns: number | null): void => write("gk.wall-columns", columns === null ? null : String(columns)),
+};
+
 /** The name a guest typed last time, so they don't have to retype it. */
 export const guestName = {
   get: (): string => read("gk.guest-name") ?? "",

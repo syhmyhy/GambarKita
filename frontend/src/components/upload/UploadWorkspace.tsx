@@ -60,7 +60,7 @@ export function UploadWorkspace({ event, sharedCount, allowance, onUploaded, onS
   const uploadsRef = useRef<HTMLElement>(null);
   /** Photos picked but not yet confirmed: nothing uploads until the guest says so. */
   const [toShare, setToShare] = useState<readonly PickedPhoto[]>([]);
-  /** Why fewer photos are offered than the guest picked (shown in the confirmation). */
+  /** Why the guest can't share every photo they picked (shown in the confirmation). */
   const [pickNote, setPickNote] = useState<PickNote | null>(null);
   // Kept in step with ``toShare`` (both set in handlers) so leaving the page can release the previews.
   const toShareRef = useRef<readonly PickedPhoto[]>([]);
@@ -95,41 +95,81 @@ export function UploadWorkspace({ event, sharedCount, allowance, onUploaded, onS
   // Photos still sending will use up some of what's left.
   const open = remaining === null ? null : Math.max(0, remaining - summary.active);
   const hint = allowanceHint(limit, remaining, open);
+  // Most photos one confirmation may share: the per-pick cap, or the guest's allowance if lower.
+  const maxShare = Math.min(MAX_FILES_PER_SELECTION, open ?? MAX_FILES_PER_SELECTION);
+
+  /**
+   * Adds ``files`` to the photos shown for confirmation (at most MAX_FILES_PER_SELECTION).
+   * The first ones fill the free places; the rest are shown unchosen, for the guest to swap in.
+   */
+  const withPicked = (current: readonly PickedPhoto[], files: readonly File[]) => {
+    const shown = files.slice(0, Math.max(0, MAX_FILES_PER_SELECTION - current.length));
+    const free = maxShare - current.filter((photo) => photo.selected).length;
+    const added = shown.map(
+      (file, index): PickedPhoto => ({
+        id: `pick-${nextPickId++}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        selected: index < free,
+      }),
+    );
+    return { next: [...current, ...added], left: files.length - shown.length };
+  };
 
   const handleFiles = (picked: File[]) => {
-    const limitText = limit === null ? "" : `Each guest can share up to ${pluralize(limit, "photo")}.`;
     if (open === 0) {
+      const limitText = limit === null ? "" : `Each guest can share up to ${pluralize(limit, "photo")}.`;
       toast.info("You've picked all the photos you can share", limitText);
       return;
     }
-    const files = picked.slice(0, Math.min(MAX_FILES_PER_SELECTION, open ?? MAX_FILES_PER_SELECTION));
+    const { next, left } = withPicked([], picked);
     // Said in the confirmation rather than a toast, which the open dialog would cover.
     let note: PickNote | null = null;
-    if (picked.length > files.length) {
+    if (picked.length > maxShare) {
       if (open !== null && open <= MAX_FILES_PER_SELECTION) {
+        const which = open === 1 ? "which one" : `which ${open}`;
+        const hidden = left > 0 ? ` Only the first ${MAX_FILES_PER_SELECTION} are shown.` : "";
         note = {
-          title: `You can add ${pluralize(open, "more photo")}`,
-          message: `Adding ${pluralize(open, "photo")} of the ${picked.length} you picked. ${limitText}`,
+          // Same words as the hint under the pickers ("up to 7" for a new guest, "2 more" later).
+          title: hint ?? `You can share ${pluralize(open, "more photo")}`,
+          message: `You picked ${picked.length}. Tap the photos to choose ${which} to share.${hidden}`,
         };
       } else {
         const rest =
           open === null
             ? "Send the rest in another go."
-            : `You can send ${pluralize(open - files.length, "more photo")} after these.`;
-        note = { title: `Adding the first ${MAX_FILES_PER_SELECTION} photos`, message: `You picked ${picked.length}. ${rest}` };
+            : `You can send ${pluralize(open - maxShare, "more photo")} after these.`;
+        note = { title: `Showing the first ${MAX_FILES_PER_SELECTION} photos`, message: `You picked ${picked.length}. ${rest}` };
       }
     }
     setPickNote(note);
-    updateToShare(files.map((file) => ({ id: `pick-${nextPickId++}`, file, previewUrl: URL.createObjectURL(file) })));
+    updateToShare(next);
+  };
+
+  const addToShare = (files: File[]) => {
+    const { next, left } = withPicked(toShare, files);
+    if (left > 0) {
+      setPickNote({
+        title: `You can pick up to ${MAX_FILES_PER_SELECTION} photos at a time`,
+        message: `${pluralize(left, "photo")} didn't fit. Send ${left === 1 ? "it" : "them"} in another go.`,
+      });
+    }
+    updateToShare(next);
+  };
+
+  const toggleShare = (id: string) => {
+    updateToShare(toShare.map((photo) => (photo.id === id ? { ...photo, selected: !photo.selected } : photo)));
   };
 
   const shareConfirmed = () => {
+    const chosen = toShare.filter((photo) => photo.selected);
+    releasePreviews(toShare.filter((photo) => !photo.selected));
     guestName.set(name);
-    // The queue takes over the previews (and releases them later).
+    // The queue takes over the chosen photos' previews (and releases them later).
     queue.add(
-      toShare.map((photo) => photo.file),
+      chosen.map((photo) => photo.file),
       { uploaderName: name.trim(), caption: caption.trim() },
-      toShare.map((photo) => photo.previewUrl),
+      chosen.map((photo) => photo.previewUrl),
     );
     updateToShare([]);
     setCaption("");
@@ -139,11 +179,6 @@ export function UploadWorkspace({ event, sharedCount, allowance, onUploaded, onS
   const cancelShare = () => {
     releasePreviews(toShare);
     updateToShare([]);
-  };
-
-  const removeFromShare = (id: string) => {
-    releasePreviews(toShare.filter((photo) => photo.id === id));
-    updateToShare(toShare.filter((photo) => photo.id !== id));
   };
 
   return (
@@ -160,15 +195,19 @@ export function UploadWorkspace({ event, sharedCount, allowance, onUploaded, onS
           maxCaptionLength={config.max_caption_length}
         />
         {/* No picking while the last allowed photos are sending: a camera shot taken now would be lost. */}
-        <PhotoPickers onFiles={handleFiles} disabled={open === 0} />
+        <PhotoPickers onFiles={handleFiles} disabled={open === 0} maxFiles={open === null ? null : maxShare} />
         {hint && <p className="text-center text-sm font-medium text-stone-600 dark:text-stone-400">{hint}</p>}
       </Card>
 
       {toShare.length > 0 && (
         <ShareConfirmDialog
           photos={toShare}
+          maxSelected={maxShare}
+          limited={open !== null}
+          canAddMore={toShare.length < MAX_FILES_PER_SELECTION}
           note={pickNote}
-          onRemove={removeFromShare}
+          onToggle={toggleShare}
+          onAddFiles={addToShare}
           onConfirm={shareConfirmed}
           onCancel={cancelShare}
         />
@@ -188,7 +227,7 @@ export function UploadWorkspace({ event, sharedCount, allowance, onUploaded, onS
 
       <p className="flex items-center justify-center gap-2 text-center text-sm text-stone-500 dark:text-stone-400">
         <ShieldCheck className="size-4 shrink-0" aria-hidden="true" />
-        Photos are processed to remove location data.
+        Your photo's location is removed before it's saved or shown.
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import { Camera, LayoutGrid, Maximize, Minimize, Pause, Play, Presentation, QrCode } from "lucide-react";
+import { Camera, LayoutGrid, Maximize, Minimize, Pause, Play, Presentation, QrCode, ZoomIn, ZoomOut } from "lucide-react";
 
 import type { ConnectionStatus } from "../../lib/realtime";
 import { pluralize } from "../../lib/format";
@@ -9,6 +9,14 @@ import { cn } from "../ui/cn";
 import type { Fullscreen } from "./useFullscreen";
 
 export type WallMode = "grid" | "slideshow";
+
+/** Grid zoom buttons: the same steps as pinching (bigger = fewer photos per row). */
+export interface ZoomControls {
+  onBigger: () => void;
+  onSmaller: () => void;
+  canBigger: boolean;
+  canSmaller: boolean;
+}
 
 interface WallTopBarProps {
   eventName: string;
@@ -26,6 +34,8 @@ interface WallTopBarProps {
   /** Omit to hide the QR toggle (e.g. when the empty state already shows a big QR code). */
   qrOpen?: boolean;
   onToggleQr?: () => void;
+  /** Only for the grid. Shown from tablet size up; phones pinch instead. */
+  zoom?: ZoomControls;
   /** Float over the photo instead of taking up space (slideshow). */
   overlay: boolean;
   /** Auto-hidden while nobody is interacting; focusing a control brings it back. */
@@ -45,6 +55,7 @@ export function WallTopBar({
   onToggleFullscreen,
   qrOpen,
   onToggleQr,
+  zoom,
   overlay,
   hidden,
 }: WallTopBarProps) {
@@ -73,11 +84,21 @@ export function WallTopBar({
             <ButtonLink
               to={uploadHref}
               size="sm"
-              className="h-11 sm:px-5 lg:hidden"
+              className="h-11 sm:px-5"
               icon={<Camera className="size-4" aria-hidden="true" />}
             >
               <span className="sr-only sm:not-sr-only">Add photos</span>
             </ButtonLink>
+          )}
+          {zoom && (
+            <div className="hidden items-center gap-2 sm:flex">
+              <IconButton variant="light" label="Smaller photos" disabled={!zoom.canSmaller} onClick={zoom.onSmaller}>
+                <ZoomOut className="size-5" aria-hidden="true" />
+              </IconButton>
+              <IconButton variant="light" label="Bigger photos" disabled={!zoom.canBigger} onClick={zoom.onBigger}>
+                <ZoomIn className="size-5" aria-hidden="true" />
+              </IconButton>
+            </div>
           )}
           {onTogglePause && (
             <IconButton variant="light" label={paused ? "Resume slideshow" : "Pause slideshow"} onClick={onTogglePause}>

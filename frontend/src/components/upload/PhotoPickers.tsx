@@ -3,10 +3,29 @@ import { type ChangeEvent, useRef } from "react";
 
 import { Button } from "../ui/Button";
 
-/** The two big actions. Each opens a hidden file input (camera, or the photo library). */
-export function PhotoPickers({ onFiles, disabled = false }: { onFiles: (files: File[]) => void; disabled?: boolean }) {
+/**
+ * The two big actions. Each opens a hidden file input (camera, or the photo library).
+ * Phone pickers can't be told "at most 6", so with ``maxFiles`` the gallery button says how
+ * many fit, and with one left the picker only allows one.
+ */
+export function PhotoPickers({
+  onFiles,
+  disabled = false,
+  maxFiles = null,
+}: {
+  onFiles: (files: File[]) => void;
+  disabled?: boolean;
+  /** How many photos the guest can share now; null when there is no limit. */
+  maxFiles?: number | null;
+}) {
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
+  const galleryLabel =
+    maxFiles === null || maxFiles <= 0
+      ? "Choose from gallery"
+      : maxFiles === 1
+        ? "Choose 1 photo"
+        : `Choose up to ${maxFiles} photos`;
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -34,7 +53,7 @@ export function PhotoPickers({ onFiles, disabled = false }: { onFiles: (files: F
         icon={<Images className="size-5" aria-hidden="true" />}
         onClick={() => galleryInput.current?.click()}
       >
-        Choose from gallery
+        {galleryLabel}
       </Button>
       <input
         ref={cameraInput}
@@ -49,7 +68,7 @@ export function PhotoPickers({ onFiles, disabled = false }: { onFiles: (files: F
         ref={galleryInput}
         type="file"
         accept="image/*"
-        multiple
+        multiple={maxFiles !== 1}
         hidden
         aria-label="Choose photos from your gallery"
         onChange={handleChange}

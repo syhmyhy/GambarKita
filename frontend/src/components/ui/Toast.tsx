@@ -6,17 +6,26 @@ import { cn } from "./cn";
 
 type ToastKind = "success" | "error" | "info";
 
+/** A button on a toast, e.g. "Undo". Tapping it also dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastItem {
   id: number;
   kind: ToastKind;
   title: string;
   description?: string;
+  action?: ToastAction;
 }
 
 interface ToastApi {
   success: (title: string, description?: string) => void;
   error: (title: string, description?: string) => void;
   info: (title: string, description?: string) => void;
+  /** A success toast with a button (e.g. "Photo deleted · Undo"), shown for ``duration`` ms. */
+  withAction: (title: string, action: ToastAction, duration: number) => void;
   /** Show a friendly message for any thrown value (ApiError, network error...). */
   fromError: (error: unknown) => void;
 }
@@ -35,10 +44,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (kind: ToastKind, title: string, description?: string) => {
+    (kind: ToastKind, title: string, description?: string, action?: ToastAction, duration = DURATION[kind]) => {
       const id = nextId.current++;
-      setToasts((current) => [...current.slice(-(MAX_VISIBLE - 1)), { id, kind, title, description }]);
-      window.setTimeout(() => dismiss(id), DURATION[kind]);
+      setToasts((current) => [...current.slice(-(MAX_VISIBLE - 1)), { id, kind, title, description, action }]);
+      window.setTimeout(() => dismiss(id), duration);
     },
     [dismiss],
   );
@@ -48,6 +57,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       success: (title, description) => push("success", title, description),
       error: (title, description) => push("error", title, description),
       info: (title, description) => push("info", title, description),
+      withAction: (title, action, duration) => push("success", title, undefined, action, duration),
       fromError: (error) => {
         const friendly = describeError(error);
         push("error", friendly.title, friendly.message);
@@ -97,6 +107,18 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => vo
         <p className="text-sm font-semibold">{toast.title}</p>
         {toast.description && <p className="mt-0.5 text-sm text-stone-600 dark:text-stone-400">{toast.description}</p>}
       </div>
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => {
+            toast.action?.onClick();
+            onDismiss();
+          }}
+          className="-my-2.5 min-h-11 shrink-0 rounded-xl px-3 text-sm font-bold text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-950/50"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={onDismiss}

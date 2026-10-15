@@ -75,6 +75,8 @@ interface RequestOptions {
   hostToken?: string;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /** Let the request finish even if the page is closing. */
+  keepalive?: boolean;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -89,6 +91,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
+      keepalive: options.keepalive,
       credentials: "omit",
       referrerPolicy: "no-referrer",
     });
@@ -142,9 +145,11 @@ export const api = {
     });
   },
 
-  deletePhoto: (eventId: string, photoId: string, hostToken: string) =>
+  /** ``keepalive`` lets the delete go through while the page is closing (a pending undoable delete). */
+  deletePhoto: (eventId: string, photoId: string, hostToken: string, options: { keepalive?: boolean } = {}) =>
     request<void>(`/api/events/${encodeURIComponent(eventId)}/photos/${encodeURIComponent(photoId)}`, {
       method: "DELETE",
       hostToken,
+      keepalive: options.keepalive,
     }),
 };
